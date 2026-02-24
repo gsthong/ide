@@ -1,30 +1,47 @@
-# Deployment Guide
+# Production Deployment Guide
 
-## Local Deployment (Docker Compose)
-Use `docker-compose` to spin up the API and Postgres locally. Since the sandbox uses Docker API via daemon, you must mount the Docker socket into the backend container.
+## Architecture Topology
+Building a robust system that can withstand internet-scale code submissions.
 
-```yaml
-version: '3.8'
-services:
-  backend:
-    build: .
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - LLM_PROVIDER=groq
-      - GROQ_API_KEY=your_key
-    ports:
-      - "8000:8000"
-      
-  db:
-      image: postgres:15
-      environment:
-        - POSTGRES_USER=postgres
+```mermaid
+graph TD;
+    Client((Frontend/Mobile)) --> WAF[Cloudflare WAF];
+    WAF --> LB[Kubernetes Ingress / AWS ALB];
+    LB --> API[FastAPI Pods HPA];
+    
+    API -- Read/Write --> PSQL[(PostgreSQL / Aurora - Master/Replica)];
+    API -- Cache/Rate Limit --> Redis[(Redis Cluster)];
+    API -- Job Dispatch --> CeleryQ[RabbitMQ/Redis Queue];
+    
+    CeleryQ --> Workers[Celery Worker Pods HPA];
+    Workers -- Spawn Secure Containers --> gVisor[gVisor Isolation Environment];
+    Workers -- Read Tests --> S3[AWS S3 - Hidden Tests Storage];
+    Workers -- Invoke APIs --> LLM[Groq / Together / Ollama];
+    
+    Prometheus[Prometheus/Grafana] -.-> API;
+    Prometheus -.-> Workers;
 ```
 
-## Production Deployment (Kubernetes)
-For true production environments, avoid DinD (Docker in Docker). Instead, use a specialized sandboxing engine like **gVisor** or **Firecracker**.
+## Step 1: Local Development
+Spin up the infrastructure locally to test:
+`docker-compose up --build -d`
 
-1. **Firecracker MicroVMs**: Isolate executions at the kernel level for multi-tenancy.
-2. **Kubernetes Jobs**: Use a dedicated worker node pool that handles individual short-lived K8s Pods with gVisor configured via `runtimeClassName: gvisor`.
-3. **Queue**: Introduce RabbitMQ caching the analyzer requests, pulling them asynchronously so slow LLMs don't block the API thread pool.
+This powers:
+- FastAPI API (Port 8000)
+- PostgreSQL Database
+- Redis (Broker & Cache)
+- Celery Task Workers
+- Prometheus Metrics Engine
+
+## Step 2: Kubernetes Migration (EKS/GKE)
+1. **Worker Pools**: Tag specific nodes for `Sandbox Execution`. Do not run other critical services (DBs, APIs) on the same node pool that executes user code.
+2. **gVisor via RuntimeClass**:
+   Patch the worker pods namespace to use `runtimeClassName: gvisor`.
+   ```yaml
+   apiVersion: node.k8s.io/v1
+   kind: RuntimeClass
+   metadata:
+     name: gvisor
+   handler: runsc
+   ```
+3. **Database Scaling**: Set up PgBouncer connection pooling to avoid exhausting Postgres connection tracking while FastAPI horizontal scales under heavy load.

@@ -1,62 +1,34 @@
-# Frontend Integration Guide (React + Monaco Editor)
+# Frontend Integration Guide (Production)
 
-## Architecture
+## Architecture Overview
+The frontend communicates directly with the robust backend APIs. Long-running executions (the LLM + Sandboxes) are handled asynchronously via Celery. The frontend must **Poll** or utilize **WebSockets**.
 
-We use React for the frontend and Microsoft's Monaco Editor for the web IDE environment.
-When the user clicks "Run/Submit", the frontend fires a request to `/analyze`.
+## Contract Flow for `/submit`
+1. **User Submits Code:**  
+   POST `{"problem_id": 1, "code": "def solve():...", "language": "python"}` to `/api/v1/submit`.
+2. **Backend Responds immediately:**  
+   `{"message": "success", "task_id": "uuid..."}`
+3. **Frontend Polls (or listens via SS/WS):**  
+   GET `/api/v1/attempts/{task_id}` every 2 seconds.
+4. **Processing Completion:**  
+   Once the payload returns `status != 'Pending'`, execution is finished.
+   If `results.score != 100`, the `ai_analysis` key will contain the strictly validated JSON matching your required schema.
+
+## Strict AI Parsing Implementation (React/Monaco Example)
+Because the backend implements a Fault-Tolerant auto-repair loop, the frontend no longer needs to worry about parsing broken JSON from the LLM. 
 
 ```tsx
-import React, { useState } from 'react';
-import Editor from '@monaco-editor/react';
+// Once you receive the payload:
+const attemptData = await response.json();
 
-function CodingPlatform() {
-  const [code, setCode] = useState('def solve(nums):\\n    pass');
-  const [hints, setHints] = useState(null);
+if (attemptData.ai_analysis) {
+  const hints = attemptData.ai_analysis.hints;
+  const metrics = attemptData.ai_analysis.complexity_analysis;
 
-  const handleAnalyze = async () => {
-    const payload = {
-      problem_description: "Find the sum of an array.",
-      constraints: "1 <= len(nums) <= 10^5",
-      student_code: code,
-      language: "python"
-    };
+  // Render Time Complexity accurately based off strict object rules:
+  renderStats(metrics.predicted_time_complexity, metrics.space_complexity);
 
-    const res = await fetch("http://localhost:8000/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    
-    if (res.ok) {
-        const analysis = await res.json();
-        setHints(analysis.hints);
-        console.log(analysis);
-    }
-  };
-
-  return (
-    <div style={{ display: 'flex', height: '100vh' }}>
-      <div style={{ flex: 1, padding: '10px' }}>
-        <h2>Problem Description</h2>
-        <p>Find the sum of an array...</p>
-        <button onClick={handleAnalyze}>Submit & Analyze</button>
-        {hints && (
-          <div className="hints-panel">
-            <h4>Hints</h4>
-            <p>1. {hints.hint_level_1}</p>
-          </div>
-        )}
-      </div>
-      <div style={{ flex: 1 }}>
-        <Editor
-          height="100vh"
-          defaultLanguage="python"
-          theme="vs-dark"
-          value={code}
-          onChange={(val) => setCode(val)}
-        />
-      </div>
-    </div>
-  );
+  // Push Hint Level 1 into UI state progressively:
+  expandHint(hints.hint_level_1);
 }
 ```

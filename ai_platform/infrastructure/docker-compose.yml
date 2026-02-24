@@ -1,0 +1,67 @@
+# infrastructure/docker-compose.yml
+version: '3.8'
+
+services:
+  # The frontend UI (Mocked for diagram)
+  # frontend:
+  #   build: ./frontend
+  #   ports: ["3000:3000"]
+  
+  api:
+    build: 
+      context: ../backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db/ai_platform
+      - REDIS_URL=redis://redis:6379/1
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - LLM_PROVIDER=groq
+      - LLM_API_KEY=${LLM_API_KEY}
+    depends_on:
+      - db
+      - redis
+      
+  worker:
+    build: 
+      context: ../backend
+      dockerfile: Dockerfile
+    command: celery -A app.core.celery_app worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db/ai_platform
+      - REDIS_URL=redis://redis:6379/1
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - LLM_PROVIDER=groq
+      - LLM_API_KEY=${LLM_API_KEY}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock # CAUTION: Local only!
+    depends_on:
+      - redis
+      - db
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=ai_platform
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  prometheus:
+    image: prom/prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+
+volumes:
+  postgres_data:

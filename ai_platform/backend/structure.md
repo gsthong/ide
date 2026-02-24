@@ -1,34 +1,54 @@
-# Backend Project Structure
+# Production AI Coding Platform Architecture
 
-The modern FastAPI application uses a layered clean architecture. 
+The architecture has been scaled up heavily to meet true production capabilities:
+Scalable, secure, observable, and rate-limited.
 
 ```text
-backend/
-├── app/
-│   ├── api/                  # API routing
-│   │   ├── dependencies.py   # common FastAPI dependencies (DB, LLM client)
-│   │   ├── routes/           # specific endpoints
-│   │   │   ├── analyze.py    # AI code analysis route
-│   │   │   ├── execute.py    # Code execution route
-│   ├── core/                 # Core utilities
-│   │   ├── config.py         # App configuration (Pydantic BaseSettings)
-│   │   ├── docker_sandbox.py # Secure Docker execution engine
-│   ├── db/                   # Database logic
-│   │   ├── models.py         # SQLAlchemy models (User, Progress, Problem)
-│   │   ├── session.py        # AsyncPG / SQLAlchemy engine setup
-│   ├── prompts/              # LLM System Prompts & Templates
-│   │   ├── analyzer_prompt.py
-│   ├── schemas/              # Pydantic validation schemas
-│   │   ├── analysis.py
-│   │   ├── execution.py
-│   ├── services/             # Application services
-│   │   ├── llm_service.py    # Abstraction layer for LLM (Groq, Together, Ollama)
-│   ├── main.py               # FastAPI App definition
-├── pyproject.toml            # Poetry/uv dependency management
-├── Dockerfile                # API runner
-├── Dockerfile.sandbox        # Sandbox runner
+ai_platform/
+├── backend/
+│   ├── app/
+│   │   ├── api/
+│   │   │   ├── dependencies.py    # JWT Auth, Rate Limiter (Redis)
+│   │   │   ├── routes/
+│   │   │   │   ├── submit.py      # Code submission & scoring
+│   │   │   │   ├── problems.py    # View problems
+│   │   │   │   ├── recommend.py   # Adaptive difficulty logic
+│   │   ├── core/
+│   │   │   ├── config.py          # Env configuration
+│   │   │   ├── celery_app.py      # Background task queue (Celery + Redis)
+│   │   │   ├── docker_sandbox.py  # Hardened execution Sandbox (Seccomp, User NS)
+│   │   │   ├── security.py        # JWT auth, hashers
+│   │   ├── db/
+│   │   │   ├── session.py         # AsyncPG connection pool
+│   │   │   ├── models.py          # SQLAlchemy PostgreSQL models
+│   │   ├── prompts/
+│   │   │   ├── analyzer_prompt.py
+│   │   ├── schemas/
+│   │   │   ├── domain.py          # Pydantic Schemas (API + LLM validation)
+│   │   ├── services/
+│   │   │   ├── adaptive_engine.py # Skill Elo rating & problem recommendations
+│   │   │   ├── llm_service.py     # Fault-tolerant LLM abstraction (Retry, Circuit Breaker, Sanitization)
+│   │   │   ├── scoring_engine.py  # Hidden/Public test case evaluation
+│   │   ├── main.py                # FastAPI bootstrapper with middleware (CORS, Monitoring)
+├── infrastructure/
+│   ├── docker-compose.yml         # Local stack (API, Postgres, Redis, Celery, Prometheus)
+│   ├── prometheus/                # Observability metrics config
+│   ├── k8s/                       # Kubernetes deployment manifests
+├── docs/
+│   ├── deployment_guide.md        # Prod guide
+│   ├── security_checklist.md      # Security checklist
+│   ├── frontend_integration.md    # Frontend guides
 ```
 
-**Design Decisions:**
-- **Clean Architecture:** Separating routes (API layer), business logic (Services layer), and isolation logic (Core).
-- **Scalability:** The `docker_sandbox.py` acts as a lightweight wrapper, but execution can easily be offloaded to a queue (e.g., Celery/RabbitMQ) when scaling.
+## Data Model Snapshot
+* **User & SkillProfile**: Tracks the user Elo rating across problem tags.
+* **Problem & Tags**: Manages difficulty, memory/time limits, and tags.
+* **Submission & Attempts**: Granular tracking per execution against public & hidden test cases.
+* **AIAnalysis**: Caches strict structured JSON feedback to save LLM tokens.
+
+## Event Driven Execution Flow
+1. User calls `/submit` -> FastAPI queues task to **Celery**.
+2. Celery Worker -> **Hardened Sandbox** pulls code, strictly confines CPU/RAM/Network.
+3. Output goes to **Scoring Engine** (evaluates against hidden/public tests).
+4. If failed/needs help, **LLM Service** analyzes the error. If JSON is invalid, **Auto-Repair Loop** kicks in.
+5. Pushes tracking stats to **Adaptive Engine** for Elo update.
