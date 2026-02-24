@@ -56,9 +56,16 @@ export default function TerminalPanel() {
 
         // Handle resize
         const resizeObserver = new ResizeObserver(() => {
-            requestAnimationFrame(() => {
-                fitAddon.fit();
-            });
+            // Need a tiny delay to ensure container has dimensions before calculating
+            setTimeout(() => {
+                if (fitAddonRef.current && terminalRef.current && terminalRef.current.clientWidth > 0 && terminalRef.current.clientHeight > 0) {
+                    try {
+                        fitAddonRef.current.fit();
+                    } catch (e) {
+                        console.warn("xterm fit error ignored", e);
+                    }
+                }
+            }, 10);
         });
 
         resizeObserver.observe(terminalRef.current);

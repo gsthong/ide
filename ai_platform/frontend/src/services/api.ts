@@ -13,6 +13,7 @@ export const submitCode = async (problemId: number, code: string, language: stri
             code,
             language,
         }),
+        credentials: 'include',
     });
 
     if (!response.ok) {
@@ -23,7 +24,9 @@ export const submitCode = async (problemId: number, code: string, language: stri
 };
 
 export const pollSubmissionStatus = async (taskId: string): Promise<SubmissionResultResponse> => {
-    const response = await fetch(`${API_BASE_URL}/attempts/${taskId}`);
+    const response = await fetch(`${API_BASE_URL}/attempts/${taskId}`, {
+        credentials: 'include',
+    });
 
     if (!response.ok) {
         throw new Error('Failed to fetch status');

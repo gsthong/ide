@@ -6,19 +6,35 @@ import { useStore } from '@/store';
 
 export default function MonacoEditor() {
     const monaco = useMonaco();
-    const { code, language, theme, setCode } = useStore();
+    const { language, theme, setCode } = useStore();
+    const { files, activeFileId, updateFileContent } = useStore();
+
+    // Helper to find active file
+    const findActiveFile = (nodes: any[]): any | null => {
+        for (const node of nodes) {
+            if (node.id === activeFileId) return node;
+            if (node.children) {
+                const found = findActiveFile(node.children);
+                if (found) return found;
+            }
+        }
+        return null;
+    };
+
+    const activeFile = findActiveFile(files);
+    const content = activeFile ? activeFile.content : '';
 
     // Custom configurations for C++ context
     React.useEffect(() => {
         if (monaco) {
-            monaco.languages.typescript.javascriptDefaults.setEagerModelSync(true);
             // We can inject custom snippets for competitive programming here later
         }
     }, [monaco]);
 
     const handleEditorChange = (value: string | undefined) => {
-        if (value !== undefined) {
-            setCode(value);
+        if (value !== undefined && activeFileId) {
+            updateFileContent(activeFileId, value);
+            setCode(value); // Keep code in sync for submission
         }
     };
 
@@ -28,7 +44,7 @@ export default function MonacoEditor() {
                 height="100%"
                 language={language}
                 theme={theme}
-                value={code}
+                value={content}
                 onChange={handleEditorChange}
                 options={{
                     minimap: { enabled: true },

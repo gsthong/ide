@@ -3,7 +3,11 @@
 import React from 'react';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import MonacoEditor from '@/features/ide/editor/MonacoEditor';
-import TerminalPanel from '@/features/ide/terminal/TerminalPanel';
+import dynamic from 'next/dynamic';
+
+const TerminalPanel = dynamic(() => import('@/features/ide/terminal/TerminalPanel'), {
+  ssr: false,
+});
 import AIAnalysisPanel from '@/features/ide/ai-panel/AIAnalysisPanel';
 import FileTree from '@/features/ide/file-tree/FileTree';
 import AuthModal from '@/features/auth/AuthModal';
@@ -13,7 +17,8 @@ import { submitCode, pollSubmissionStatus } from '@/services/api';
 
 export default function Home() {
   const {
-    code,
+    files,
+    activeFileId,
     language,
     appendOutput,
     clearOutput,
@@ -31,6 +36,11 @@ export default function Home() {
   const [isAuthModalOpen, setIsAuthModalOpen] = React.useState(false);
 
   const handleRunCode = async () => {
+    if (!isAuthenticated) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+
     if (isExecuting) return;
 
     clearOutput();
@@ -39,8 +49,24 @@ export default function Home() {
     setSubmissionState('pending', 'submitting');
 
     try {
-      // 1. Submit Code
-      const submitResponse = await submitCode(1, code, language);
+      // 1. Get Active File Content
+      let currentCode = '';
+      const findActiveFile = (nodes: any[]): any | null => {
+        for (const node of nodes) {
+          if (node.id === activeFileId) return node;
+          if (node.children) {
+            const found = findActiveFile(node.children);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+
+      const activeFile = findActiveFile(files);
+      if (activeFile) currentCode = activeFile.content || '';
+
+      // 2. Submit Code
+      const submitResponse = await submitCode(1, currentCode, language);
       const taskId = submitResponse.task_id;
       appendOutput(`Task Queued: ${taskId}\r\n`);
       setSubmissionState(taskId, 'polling');
@@ -136,11 +162,13 @@ export default function Home() {
         <PanelGroup orientation="horizontal">
 
           {/* Left Column: Explorer */}
-          <Panel defaultSize={20} minSize={15} maxSize={30}>
+          <Panel defaultSize={20} minSize={15}>
             <FileTree />
           </Panel>
 
-          <PanelResizeHandle className="w-1 bg-[#252526] hover:bg-blue-600 transition-colors cursor-col-resize flex flex-col items-center justify-center border-r border-gray-800" />
+          <PanelResizeHandle className="w-4 bg-[#252526] hover:bg-blue-600 transition-colors cursor-col-resize flex flex-col items-center justify-center border-x border-gray-800 z-10 relative">
+            <div className="h-12 w-1.5 bg-gray-500 rounded-full" />
+          </PanelResizeHandle>
 
           {/* Middle Column: Editor & Terminal */}
           <Panel defaultSize={50} minSize={30}>
@@ -151,8 +179,8 @@ export default function Home() {
                 </div>
               </Panel>
 
-              <PanelResizeHandle className="h-2 bg-[#252526] hover:bg-blue-600 transition-colors cursor-row-resize flex items-center justify-center border-r border-gray-800">
-                <div className="w-16 h-1 bg-gray-600 rounded-full" />
+              <PanelResizeHandle className="h-4 bg-[#252526] hover:bg-blue-600 transition-colors cursor-row-resize flex items-center justify-center border-y border-gray-800 z-10 relative">
+                <div className="w-12 h-1.5 bg-gray-500 rounded-full" />
               </PanelResizeHandle>
 
               <Panel defaultSize={30} minSize={10}>
@@ -163,8 +191,8 @@ export default function Home() {
             </PanelGroup>
           </Panel>
 
-          <PanelResizeHandle className="w-2 bg-[#252526] hover:bg-blue-600 transition-colors cursor-col-resize flex flex-col items-center justify-center">
-            <div className="h-16 w-1 bg-gray-600 rounded-full" />
+          <PanelResizeHandle className="w-4 bg-[#252526] hover:bg-blue-600 transition-colors cursor-col-resize flex flex-col items-center justify-center border-x border-gray-800 z-10 relative">
+            <div className="h-12 w-1.5 bg-gray-500 rounded-full" />
           </PanelResizeHandle>
 
           {/* Right Column: AI Tutor Panel */}

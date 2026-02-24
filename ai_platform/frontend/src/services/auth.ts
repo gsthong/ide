@@ -13,6 +13,7 @@ export const login = async (username: string, password: string): Promise<{ acces
             'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: formData.toString(),
+        credentials: 'include',
     });
 
     if (!response.ok) {
@@ -29,6 +30,7 @@ export const register = async (username: string, email: string, password: string
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({ username, email, password }),
+        credentials: 'include',
     });
 
     if (!response.ok) {
@@ -41,5 +43,6 @@ export const register = async (username: string, email: string, password: string
 export const logout = async (): Promise<void> => {
     await fetch(`${API_URL}/auth/logout`, {
         method: 'POST',
+        credentials: 'include',
     });
 };
