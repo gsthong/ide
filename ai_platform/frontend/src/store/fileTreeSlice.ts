@@ -20,6 +20,9 @@ export interface FileTreeSlice {
     removeOpenFile: (id: string) => void;
     updateFileContent: (id: string, content: string) => void;
     toggleFolder: (id: string) => void;
+    addFile: (parentId: string | null, name: string, isFolder: boolean) => void;
+    deleteFile: (id: string) => void;
+    renameFile: (id: string, newName: string) => void;
 }
 
 const initialFiles: FileNode[] = [
@@ -120,6 +123,77 @@ export const createFileTreeSlice: StateCreator<FileTreeSlice> = (set, get) => ({
             };
 
             return { files: toggleFolderRecursive(state.files) };
+        });
+    },
+
+    addFile: (parentId, name, isFolder) => {
+        const generateId = () => Math.random().toString(36).substring(2, 11);
+        const newNode: FileNode = {
+            id: generateId(),
+            name,
+            isFolder,
+            isOpen: isFolder ? true : undefined,
+            children: isFolder ? [] : undefined,
+            content: isFolder ? undefined : ''
+        };
+
+        set((state) => {
+            if (!parentId) {
+                return { files: [...state.files, newNode] };
+            }
+            const addNodeRecursive = (nodes: FileNode[]): FileNode[] => {
+                return nodes.map(node => {
+                    if (node.id === parentId && node.isFolder) {
+                        return { ...node, children: [...(node.children || []), newNode], isOpen: true };
+                    }
+                    if (node.isFolder && node.children) {
+                        return { ...node, children: addNodeRecursive(node.children) };
+                    }
+                    return node;
+                });
+            };
+            return { files: addNodeRecursive(state.files) };
+        });
+    },
+
+    deleteFile: (id) => {
+        set((state) => {
+            const deleteNodeRecursive = (nodes: FileNode[]): FileNode[] => {
+                return nodes.filter(node => node.id !== id).map(node => {
+                    if (node.isFolder && node.children) {
+                        return { ...node, children: deleteNodeRecursive(node.children) };
+                    }
+                    return node;
+                });
+            };
+            
+            const newFiles = deleteNodeRecursive(state.files);
+            const { openFiles, activeFileId } = state;
+            const newOpenFiles = openFiles.filter(fid => fid !== id);
+            const isDeletedActive = activeFileId === id;
+            
+            return {
+                files: newFiles,
+                openFiles: newOpenFiles,
+                activeFileId: isDeletedActive ? (newOpenFiles.length > 0 ? newOpenFiles[0] : null) : activeFileId
+            };
+        });
+    },
+
+    renameFile: (id, newName) => {
+        set((state) => {
+            const renameNodeRecursive = (nodes: FileNode[]): FileNode[] => {
+                return nodes.map(node => {
+                    if (node.id === id) {
+                        return { ...node, name: newName };
+                    }
+                    if (node.isFolder && node.children) {
+                        return { ...node, children: renameNodeRecursive(node.children) };
+                    }
+                    return node;
+                });
+            };
+            return { files: renameNodeRecursive(state.files) };
         });
     }
 });
