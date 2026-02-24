@@ -1,32 +1,62 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from schemas.domain import SubmitCodeRequest, SubmissionResultResponse, AIAnalysisResponse
-from api.dependencies import get_current_user_id, rate_limit
-from core.celery_app import process_submission_task
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.schemas.domain import SubmitCodeRequest, SubmissionResultResponse, AIAnalysisResponse
+from app.api.dependencies import get_current_user_id, rate_limit, get_db_session
+from app.core.celery_app import process_submission_task
 from celery.result import AsyncResult
+
+from app.db.models import Submission, Problem
 
 router = APIRouter()
 
 @router.post("/submit", dependencies=[Depends(rate_limit(15))])
 async def submit_code(
     request: SubmitCodeRequest, 
-    user_id: int = Depends(get_current_user_id)
+    user_id: int = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Ingests the submission. Validates code size limit handled by Pydantic.
     Pushes work to Celery Worker cluster to avoid blocking API threads.
     """
-    # Fetch problem from DB mock...
-    mock_problem_desc = "Compute the Nth Fibonacci number."
-    mock_constraints = "1 <= N <= 30"
-    mock_tests = {
-        "public": [{"id": "p1", "input": "5", "expected": "5", "weight": 1.0}],
-        "hidden": [{"id": "h1", "input": "10", "expected": "55", "weight": 2.0}]
-    }
-    mock_db_submission_id = 999
+    # Verify Problem Exists (or mock for blueprint)
+    stmt = select(Problem).where(Problem.id == request.problem_id)
+    result = await db.execute(stmt)
+    problem = result.scalar_one_or_none()
+    
+    if not problem:
+        # Mock problem for blueprint purposes if empty DB
+        mock_problem_desc = "Compute the Nth Fibonacci number."
+        mock_constraints = "1 <= N <= 30"
+        mock_tests = {
+            "public": [{"id": "p1", "input": "5", "expected": "5", "weight": 1.0}],
+            "hidden": [{"id": "h1", "input": "10", "expected": "55", "weight": 2.0}]
+        }
+    else:
+        mock_problem_desc = problem.description
+        mock_constraints = problem.constraints
+        mock_tests = {
+            "public": problem.public_test_cases,
+            "hidden": problem.hidden_test_cases
+        }
+
+    # Create Submission Record
+    new_submission = Submission(
+        user_id=user_id,
+        problem_id=request.problem_id if problem else None, # Allow null for blueprint mocked execution
+        code=request.code,
+        language=request.language,
+        status="Pending"
+    )
+    db.add(new_submission)
+    await db.commit()
+    await db.refresh(new_submission)
     
     # 1. Dispatch background job
     task = process_submission_task.delay(
-        submission_id=mock_db_submission_id,
+        submission_id=new_submission.id,
         student_code=request.code,
         language=request.language,
         test_cases=mock_tests,
@@ -36,7 +66,7 @@ async def submit_code(
         constraints=mock_constraints
     )
     
-    return {"message": "Code submitted successfully.", "task_id": task.id}
+    return {"message": "Code submitted successfully.", "task_id": task.id, "submission_id": new_submission.id}
 
 @router.get("/attempts/{task_id}", response_model=SubmissionResultResponse)
 async def get_attempt_status(task_id: str):

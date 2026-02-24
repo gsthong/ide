@@ -1,35 +1,61 @@
 import os
 import redis
-from fastapi import Request, HTTPException, Depends
-import time
+from fastapi import Request, HTTPException, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from jose import jwt, JWTError
+from app.core.config import settings
+from app.db.database import get_db_session
+from app.db.models import User
+from sqlalchemy import select
 
-redis_client = redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/1"))
+redis_client = redis.Redis.from_url(settings.REDIS_URL)
 
-def get_current_user_id(request: Request) -> int:
-    """Mock JWT auth extraction. In Prod, decode PyJWT from headers."""
-    auth = request.headers.get("Authorization")
-    if not auth or not auth.startswith("Bearer User"):
-        # Just returning a mock user 1 for the blueprint
-        return 1
-    return int(auth.split("User")[1])
+async def get_current_user_optional(request: Request, db: AsyncSession = Depends(get_db_session)) -> User | None:
+    token = request.cookies.get("access_token")
+    if not token:
+        auth = request.headers.get("Authorization")
+        if auth and auth.startswith("Bearer "):
+            token = auth.split(" ")[1]
+            
+    if not token:
+        return None
+        
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            return None
+    except JWTError:
+        return None
+        
+    result = await db.execute(select(User).where(User.id == int(user_id)))
+    return result.scalar_one_or_none()
+
+async def get_current_user(request: Request, db: AsyncSession = Depends(get_db_session)) -> User:
+    user = await get_current_user_optional(request, db)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return user
+
+async def get_current_user_id(user: User = Depends(get_current_user)) -> int:
+    return user.id
 
 def rate_limit(requests_per_minute: int = 10):
-    """
-    Token bucket style rate limiting utilizing Redis.
-    Limits by IP Address.
-    """
-    def _rate_limit_dependency(request: Request):
+    async def _rate_limit_dependency(request: Request, user: User | None = Depends(get_current_user_optional)):
         if not redis_client:
             return True
             
-        client_ip = request.client.host
-        key = f"rate_limit:{client_ip}"
+        if user:
+            identifier = f"user:{user.id}"
+        else:
+            identifier = f"ip:{request.client.host}"
+            
+        key = f"rate_limit:{identifier}"
         
-        # Simple redis counter expiration implementation
         try:
             current = redis_client.get(key)
             if current and int(current) >= requests_per_minute:
-                raise HTTPException(status_code=429, detail="Too Many Requests. Submission throttled.")
+                raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too Many Requests. Submission throttled.")
             else:
                 pipe = redis_client.pipeline()
                 pipe.incr(key, 1)
@@ -41,6 +67,5 @@ def rate_limit(requests_per_minute: int = 10):
         return True
     return _rate_limit_dependency
 
-def get_db():
-    # Dependency to get AsyncPG session
-    yield None
+# Export get_db_session as get_db for compatibility with existing routes
+get_db = get_db_session

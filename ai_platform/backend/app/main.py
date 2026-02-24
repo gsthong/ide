@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import submit
+from api.routes import submit, auth
 from prometheus_fastapi_instrumentator import Instrumentator
 
 app = FastAPI(
@@ -19,6 +19,7 @@ app.add_middleware(
 )
 
 # Mount Routes
+app.include_router(auth.router, prefix="/api/v1")
 app.include_router(submit.router, prefix="/api/v1")
 
 # Observability (Prometheus)

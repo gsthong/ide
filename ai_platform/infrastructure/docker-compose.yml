@@ -29,6 +29,8 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - LLM_PROVIDER=groq
       - LLM_API_KEY=${LLM_API_KEY}
+    volumes:
+      - ../backend:/app
     depends_on:
       - db
       - redis
@@ -46,6 +48,7 @@ services:
       - LLM_API_KEY=${LLM_API_KEY}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock # CAUTION: Local only!
+      - ../backend:/app
     depends_on:
       - redis
       - db
