@@ -10,6 +10,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Ensure Python can import from the 'app' directory correctly
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app/app
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

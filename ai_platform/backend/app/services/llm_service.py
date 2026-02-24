@@ -43,10 +43,14 @@ class FaultTolerantLLMService(LLMServiceBase):
 
     async def _call_inference(self, prompt: str) -> str:
         """Raw inference call abstraction over provider differences."""
+        payload = {}
         if self.provider in ["groq", "together"]:
             payload = {
                 "model": self.model,
-                "messages": [{"role": "system", "content": prompt}],
+                "messages": [
+                    {"role": "system", "content": "You are a senior C++ engineer. Always output strict JSON matching the requested schema. Never output markdown outside of the JSON."},
+                    {"role": "user", "content": prompt}
+                ],
                 "response_format": {"type": "json_object"},
                 "temperature": float(os.getenv("LLM_TEMPERATURE", "0.1")),
                 "seed": 42 # Deterministic mode
@@ -64,13 +68,17 @@ class FaultTolerantLLMService(LLMServiceBase):
             }
             
         async with httpx.AsyncClient() as client:
-            resp = await client.post(self.endpoint, json=payload, headers=self.headers, timeout=45.0)
-            resp.raise_for_status()
-            data = resp.json()
-            if self.provider in ["groq", "together"]:
-                return data["choices"][0]["message"]["content"]
-            else:
-                return data["response"]
+            try:
+                resp = await client.post(self.endpoint, json=payload, headers=self.headers, timeout=45.0)
+                resp.raise_for_status()
+                data = resp.json()
+                if self.provider in ["groq", "together"]:
+                    return data["choices"][0]["message"]["content"]
+                else:
+                    return data["response"]
+            except httpx.HTTPError as e:
+                logger.error(f"HTTP Provider Error [{self.provider}]: {str(e)}")
+                raise
 
     async def analyze_code(self, problem_description: str, constraints: str, student_code: str, execution_output: str) -> AIAnalysisResponse:
         """

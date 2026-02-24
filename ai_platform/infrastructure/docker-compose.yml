@@ -2,13 +2,18 @@
 version: '3.8'
 
 services:
-  # The frontend UI (Mocked for diagram)
-  # frontend:
-  #   build: ./frontend
-  #   ports: ["3000:3000"]
-  
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+    depends_on:
+      - api
   api:
-    build: 
+    build:
       context: ../backend
       dockerfile: Dockerfile
     ports:
@@ -22,9 +27,9 @@ services:
     depends_on:
       - db
       - redis
-      
+
   worker:
-    build: 
+    build:
       context: ../backend
       dockerfile: Dockerfile
     command: celery -A app.core.celery_app worker --loglevel=info

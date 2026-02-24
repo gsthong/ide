@@ -19,6 +19,10 @@ async def execute_code_secure(code: str, language: str = "python", timeout_secon
     if not client:
         return {"output": "Docker daemon not available.", "error": True, "tle": False, "memory_used_mb": 0.0, "time_taken_ms": 0}
 
+    if language == "cpp":
+        from infrastructure.docker.cpp_sandbox import execute_cpp_secure
+        return await execute_cpp_secure(code, timeout_seconds, memory_limit_mb)
+
     if language != "python":
         raise ValueError(f"Language {language} not supported yet.")
 

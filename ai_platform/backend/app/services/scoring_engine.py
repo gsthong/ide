@@ -80,13 +80,30 @@ if __name__ == '__main__':
                 "passed": passed,
                 "execution_time_ms": time_ms,
                 "memory_used_mb": mem_mb,
-                "error_message": execution["output"] if not passed else None
+                "error_message": execution["output"] if not passed else None,
+                "status": execution.get("status", "System Error")
             })
             
         final_score = (earned_score / total_possible_score * 100) if total_possible_score > 0 else 0.0
-        status = "Accepted" if all_passed else ("Wrong Answer" if final_score > 0 else "Failed")
-        if any(r["error_message"] == "Time Limit Exceeded" for r in results_breakdown):
-            status = "TLE"
+        
+        # Aggregate the final verdict status based on all attempts
+        # Priority of failure: Compilation Error > Runtime Error/SegFault > TLE/MLE > Wrong Answer
+        status = "Accepted" if all_passed else "Wrong Answer"
+        
+        # Find highest priority error
+        for r in results_breakdown:
+            if r["status"] == "Compilation Error":
+                status = "Compilation Error"
+                break
+            elif "Runtime Error" in r["status"] or "Segmentation Fault" in r["status"]:
+                status = r["status"]
+            elif "Time Limit Exceeded" in r["status"] and status not in ["Compilation Error", "Runtime Error", "Segmentation Fault"]:
+                status = "Time Limit Exceeded"
+            elif "Memory Limit Exceeded" in r["status"] and status not in ["Compilation Error", "Runtime Error", "Segmentation Fault", "Time Limit Exceeded"]:
+                status = "Memory Limit Exceeded"
+        
+        if final_score == 0 and status == "Wrong Answer":
+            status = "Failed"
 
         return {
             "status": status,

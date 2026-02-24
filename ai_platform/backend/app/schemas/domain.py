@@ -52,6 +52,7 @@ class SubmitCodeRequest(BaseModel):
 class AttemptResult(BaseModel):
     test_case_id: str
     passed: bool
+    status: str
     execution_time_ms: Optional[int]
     error_message: Optional[str]
 
