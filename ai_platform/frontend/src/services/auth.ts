@@ -1,6 +1,6 @@
 import { UserResponse } from '../types';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api/v1';
 
 export const login = async (username: string, password: string): Promise<{ access_token: string, token_type: string }> => {
     const formData = new URLSearchParams();

@@ -81,19 +81,31 @@ async def get_attempt_status(task_id: str):
             submission_id=-1, status="Pending", score=0.0, time_taken_ms=0, memory_used_mb=0.0, attempts=[], ai_analysis=None
         )
     
-    data = res.get()
-    
-    # Cast ai_analysis back to strict Schema class
-    analysis_obj = None
-    if data["ai_analysis"] and "error" not in data["ai_analysis"]:
-        analysis_obj = AIAnalysisResponse(**data["ai_analysis"])
+    try:
+        data = res.get()
         
-    return SubmissionResultResponse(
-        submission_id=data["submission_id"],
-        status=data["results"]["status"],
-        score=data["results"]["score"],
-        time_taken_ms=data["results"]["time_taken_ms"],
-        memory_used_mb=data["results"]["memory_used_mb"],
-        attempts=data["results"]["attempts"],
-        ai_analysis=analysis_obj
-    )
+        # Cast ai_analysis back to strict Schema class
+        analysis_obj = None
+        if data.get("ai_analysis") and "error" not in data.get("ai_analysis", {}):
+            analysis_obj = AIAnalysisResponse(**data["ai_analysis"])
+            
+        return SubmissionResultResponse(
+            submission_id=data.get("submission_id", -1),
+            status=data["results"]["status"],
+            score=data["results"]["score"],
+            time_taken_ms=data["results"]["time_taken_ms"],
+            memory_used_mb=data["results"]["memory_used_mb"],
+            attempts=data["results"]["attempts"],
+            ai_analysis=analysis_obj
+        )
+    except Exception as e:
+        # Task failed in Celery (e.g., TimeLimitExceeded or internal crash)
+        return SubmissionResultResponse(
+            submission_id=-1,
+            status=f"System Error: {str(e)}",
+            score=0.0,
+            time_taken_ms=0,
+            memory_used_mb=0.0,
+            attempts=[],
+            ai_analysis=None
+        )

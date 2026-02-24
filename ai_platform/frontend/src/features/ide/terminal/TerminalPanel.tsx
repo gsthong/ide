@@ -49,7 +49,15 @@ export default function TerminalPanel() {
         term.loadAddon(fitAddon);
 
         term.open(terminalRef.current);
-        fitAddon.fit();
+
+        // Only fit initially if we have dimensions
+        if (terminalRef.current.clientWidth > 0 && terminalRef.current.clientHeight > 0) {
+            try {
+                fitAddon.fit();
+            } catch (e) {
+                console.warn("Initial xterm fit error ignored", e);
+            }
+        }
 
         xtermRef.current = term;
         fitAddonRef.current = fitAddon;

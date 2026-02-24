@@ -37,155 +37,172 @@ SECCOMP_PROFILE = {
     ]
 }
 
-async def execute_cpp_secure(code: str, timeout_seconds: int = 5, memory_limit_mb: int = 128) -> Dict[str, Any]:
+import base64
+import uuid
+
+async def compile_cpp_secure(code: str) -> Dict[str, Any]:
     """
-    Two-stage execution sandbox for C++:
-    1. Compile the code (with slightly relaxed resource limits).
-    2. Execute the compiled binary (with extremely strict limits and seccomp).
+    Stage 1: Compile the code inside a container, saving the binary to a Docker-managed Volume.
+    This bypasses DooD bind mount path issues.
     """
     if not client:
-        return {"output": "Docker daemon not available.", "error": True, "tle": False, "memory_used_mb": 0.0, "time_taken_ms": 0, "status": "Runtime Error"}
+        return {"output": "Docker daemon not available.", "error": True, "status": "Compilation Error"}
 
-    with tempfile.TemporaryDirectory() as host_temp_dir:
-        code_path = os.path.join(host_temp_dir, "solution.cpp")
-        with open(code_path, "w") as f:
-            f.write(code)
+    volume_name = f"cpp_sandbox_{uuid.uuid4().hex}"
+    try:
+        client.volumes.create(name=volume_name)
+    except Exception as e:
+        logger.error(f"Volume creation failed: {e}")
+        return {"output": "System Error: Volume mapping failed.", "error": True, "status": "Compilation Error"}
 
-        # Stage 1: Compilation
-        try:
-            # We compile by mounting the source read-only, and compiling the output into a temporary folder.
-            # To do this safely and retrieve the binary for step 2, we actually mount an output dir for the compiler.
-            # However, for maximum security, we'll do both steps in one container lifecycle if possible,
-            # using a shell script, because docker network latency between two containers can add up.
-            # BUT: combining them means the compiled code runs with the compiler's privileges and seccomp profile.
-            # A true production system separates them. Let's do a single container for now but with isolated steps.
-            
-            # Since we must isolate compilation and execution seccomp profiles, we run two containers.
-            compile_container = client.containers.run(
-                image="gcc:13",
-                command=["g++", "-O2", "-std=c++17", "-static", "-w", "/app/solution.cpp", "-o", "/app/solution"],
-                volumes={
-                    host_temp_dir: {'bind': '/app', 'mode': 'rw'}
-                },
-                working_dir="/app",
-                network_mode="none",
-                mem_limit="512m", # Compilation can be memory intensive
-                cpu_count=1,
-                detach=False, # Wait for compilation
-                remove=True
-            )
-        except docker.errors.ContainerError as e:
-            # Compilation failed
-            stderr = e.stderr.decode("utf-8") if e.stderr else "Compilation Error"
-            return {
-                "output": stderr,
-                "error": True,
-                "tle": False,
-                "time_taken_ms": 0,
-                "memory_used_mb": 0.0,
-                "status": "Compilation Error"
-            }
-        except Exception as e:
-            logger.error(f"Compilation crash: {str(e)}")
-            return {"output": "Internal Compilation Error", "error": True, "tle": False, "time_taken_ms": 0, "memory_used_mb": 0.0, "status": "Compilation Error"}
+    # Base64 encode the code to avoid bash formatting bugs when injecting via shell
+    encoded_code = base64.b64encode(code.encode('utf-8')).decode('utf-8')
+    compile_script = f"echo {encoded_code} | base64 -d > /app/solution.cpp && g++ -O2 -std=c++17 -static -w /app/solution.cpp -o /app/solution && chmod 755 /app/solution"
 
-        # Check if binary was created
-        binary_path = os.path.join(host_temp_dir, "solution")
-        if not os.path.exists(binary_path):
-            return {"output": "Binary not found after compilation", "error": True, "tle": False, "time_taken_ms": 0, "memory_used_mb": 0.0, "status": "Compilation Error"}
+    try:
+        compile_container = client.containers.run(
+            image="gcc:13",
+            command=["sh", "-c", compile_script],
+            volumes={
+                volume_name: {'bind': '/app', 'mode': 'rw'}
+            },
+            working_dir="/app",
+            network_mode="none",
+            mem_limit="512m",
+            cpu_count=1,
+            detach=False,
+            remove=True
+        )
+    except docker.errors.ContainerError as e:
+        stderr = e.stderr.decode("utf-8") if e.stderr else "Compilation Error"
+        return {
+            "output": stderr,
+            "error": True,
+            "status": "Compilation Error",
+            "volume_name": volume_name
+        }
+    except Exception as e:
+        logger.error(f"Compilation crash: {str(e)}")
+        return {"output": "Internal Compilation Error", "error": True, "status": "Compilation Error", "volume_name": volume_name}
+    
+    return {
+        "output": "Compilation successful",
+        "error": False,
+        "status": "Compiled",
+        "volume_name": volume_name
+    }
 
-        # Make executable (just in case)
-        os.chmod(binary_path, 0o755)
-
-        # Stage 2: Execution
-        try:
-            # PROD-LEVEL ISOLATION for Execution
-            container = client.containers.run(
-                image="debian:bookworm-slim", # Minimal image, just needs glibc
-                command=["/app/solution"],
-                volumes={host_temp_dir: {'bind': '/app', 'mode': 'ro'}}, 
-                working_dir="/app",
-                detach=True,
-                network_mode="none",             
-                mem_limit=f"{memory_limit_mb}m", 
-                memswap_limit=f"{memory_limit_mb}m",             
-                pids_limit=20, # Very low fork limit                 
-                read_only=True,                  
-                cpu_count=1,
-                cap_drop=["ALL"], # Drop ALL Linux capabilities
-                tmpfs={"/tmp": "size=5m,noexec,nosuid,nodev"},  
-                security_opt=[
-                    "no-new-privileges:true",
-                    # In a real environment, we'd pass a JSON file here for seccomp.
-                    # "seccomp=/path/to/profile.json" 
-                ], 
-                user="1000:1000" # Run as non-root (nobody or generic uid)
-            )
-            
-            start_time = asyncio.get_event_loop().time()
-            status = 'created'
-            
-            while status in ['created', 'running']:
-                elapsed = asyncio.get_event_loop().time() - start_time
-                if elapsed > timeout_seconds:
-                    container.kill()
-                    return {
-                        "output": "Time Limit Exceeded", 
-                        "error": True, 
-                        "tle": True, 
-                        "time_taken_ms": int(elapsed * 1000), 
-                        "memory_used_mb": float(memory_limit_mb),
-                        "status": "Time Limit Exceeded"
-                    }
-                
-                await asyncio.sleep(0.05)
+async def run_cpp_secure(volume_name: str, stdin_data: str, timeout_seconds: int = 5, memory_limit_mb: int = 128) -> Dict[str, Any]:
+    """
+    Stage 2: Run the already compiled binary securely with strict seccomp/memory limits.
+    """
+    if not client:
+        return {"output": "Docker missing", "error": True, "tle": False, "memory_used_mb": 0.0, "time_taken_ms": 0, "status": "System Error"}
+        
+    try:
+        # Inject stdin securely by echoing base64 to /tmp/input.txt
+        encoded_stdin = base64.b64encode(stdin_data.encode('utf-8')).decode('utf-8')
+        run_script = f"echo {encoded_stdin} | base64 -d > /tmp/input.txt && /app/solution < /tmp/input.txt"
+        
+        # PROD-LEVEL ISOLATION for Execution
+        container = client.containers.run(
+            image="debian:bookworm-slim",
+            command=["sh", "-c", run_script],
+            volumes={volume_name: {'bind': '/app', 'mode': 'ro'}}, 
+            working_dir="/app",
+            detach=True,
+            network_mode="none",             
+            mem_limit=f"{memory_limit_mb}m", 
+            memswap_limit=f"{memory_limit_mb}m",             
+            pids_limit=20,                 
+            read_only=True,                  
+            cpu_count=1,
+            cap_drop=["ALL"],
+            tmpfs={"/tmp": "size=5m,noexec,nosuid,nodev"},  
+            security_opt=[
+                "no-new-privileges:true",
+            ], 
+            user="nobody"
+        )
+        
+        start_time = asyncio.get_event_loop().time()
+        status = 'created'
+        
+        while status in ['created', 'running']:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            if elapsed > timeout_seconds:
                 try:
-                    container.reload()
-                    status = container.status
-                except docker.errors.NotFound:
-                    status = 'exited'
-
-            # Gather telemetry before collecting logs
-            stats = container.stats(stream=False)
-            mem_usage_bytes = stats.get("memory_stats", {}).get("usage", 0)
-            mem_used_mb = mem_usage_bytes / (1024 * 1024)
-            time_taken_ms = int((asyncio.get_event_loop().time() - start_time) * 1000)
-
-            # Cap output at 100KB to prevent memory flood
+                    container.kill()
+                except docker.errors.APIError:
+                    pass
+                return {
+                    "output": "Time Limit Exceeded", 
+                    "error": True, 
+                    "tle": True, 
+                    "time_taken_ms": int(elapsed * 1000), 
+                    "memory_used_mb": float(memory_limit_mb),
+                    "status": "Time Limit Exceeded"
+                }
+            
+            await asyncio.sleep(0.05)
             try:
-                logs = container.logs(stdout=True, stderr=True).decode("utf-8")
-                if len(logs) > 100000:
-                    logs = logs[:100000] + "\n...[Output Truncated]..."
-            except docker.errors.APIError:
-                logs = "Error reading logs."
+                container.reload()
+                status = container.status
+            except docker.errors.NotFound:
+                status = 'exited'
 
+        stats = container.stats(stream=False)
+        mem_usage_bytes = stats.get("memory_stats", {}).get("usage", 0)
+        mem_used_mb = mem_usage_bytes / (1024 * 1024)
+        time_taken_ms = int((asyncio.get_event_loop().time() - start_time) * 1000)
+
+        # Cap output at 100KB
+        try:
+            logs = container.logs(stdout=True, stderr=True).decode("utf-8")
+            if len(logs) > 100000:
+                logs = logs[:100000] + "\n...[Output Truncated]..."
+        except docker.errors.APIError:
+            logs = "Error reading logs."
+
+        try:
             exit_code = container.attrs['State']['ExitCode']
             container.remove(force=True)
-            
-            # Map exit codes to common segmentation faults, etc.
-            is_error = exit_code != 0
-            exec_status = "Accepted"
-            if is_error:
-                if exit_code == 139:
-                    exec_status = "Segmentation Fault"
-                elif exit_code == 137:
-                    exec_status = "Memory Limit Exceeded / Killed" # Often triggered by OOM killer
-                    # The container was OOM killed
-                    mem_used_mb = float(memory_limit_mb)
-                else:
-                    exec_status = f"Runtime Error (Exit Code {exit_code})"
+        except Exception:
+            exit_code = -1
+        
+        is_error = exit_code != 0
+        exec_status = "Accepted"
+        if is_error:
+            if exit_code == 139:
+                exec_status = "Segmentation Fault"
+            elif exit_code == 137:
+                exec_status = "Memory Limit Exceeded / Killed"
+                mem_used_mb = float(memory_limit_mb)
+            else:
+                exec_status = f"Runtime Error (Exit Code {exit_code})"
 
-            return {
-                "output": logs, 
-                "error": is_error, 
-                "tle": False,
-                "time_taken_ms": time_taken_ms,
-                "memory_used_mb": round(mem_used_mb, 2),
-                "status": exec_status
-            }
+        return {
+            "output": logs, 
+            "error": is_error, 
+            "tle": False,
+            "time_taken_ms": time_taken_ms,
+            "memory_used_mb": round(mem_used_mb, 2),
+            "status": exec_status
+        }
 
-        except docker.errors.ContainerError as e:
-            return {"output": e.stderr.decode("utf-8") if e.stderr else "Fatal runtime error.", "error": True, "tle": False, "time_taken_ms": 0, "memory_used_mb": 0.0, "status": "Runtime Error"}
+    except docker.errors.ContainerError as e:
+        return {"output": e.stderr.decode("utf-8") if e.stderr else "Fatal runtime error.", "error": True, "tle": False, "time_taken_ms": 0, "memory_used_mb": 0.0, "status": "Runtime Error"}
+    except Exception as e:
+        logger.error(f"Sandbox crash: {str(e)}")
+        return {"output": str(e), "error": True, "tle": False, "time_taken_ms": 0, "memory_used_mb": 0.0, "status": "System Error"}
+
+async def cleanup_cpp_secure(volume_name: str):
+    """
+    Cleans up the docker volume post execution.
+    """
+    if client and volume_name:
+        try:
+            vol = client.volumes.get(volume_name)
+            vol.remove(force=True)
         except Exception as e:
-            logger.error(f"Sandbox crash: {str(e)}")
-            return {"output": str(e), "error": True, "tle": False, "time_taken_ms": 0, "memory_used_mb": 0.0, "status": "System Error"}
+            logger.warning(f"Failed to cleanup volume {volume_name}: {e}")

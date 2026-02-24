@@ -23,8 +23,8 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
-    task_time_limit=30,      # Absolute killer
-    task_soft_time_limit=25  # Throw exception gracefully before hard kill
+    task_time_limit=120,      # Give LLM generation more time
+    task_soft_time_limit=115  # Throw exception gracefully before hard kill
 )
 
 @celery_app.task(bind=True, max_retries=3)
