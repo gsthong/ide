@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import submit, auth
+from api.routes import submit, auth, health
 from prometheus_fastapi_instrumentator import Instrumentator
 
 app = FastAPI(
@@ -21,10 +21,7 @@ app.add_middleware(
 # Mount Routes
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(submit.router, prefix="/api/v1")
+app.include_router(health.router, prefix="/api/v1")
 
 # Observability (Prometheus)
 Instrumentator().instrument(app).expose(app)
-
-@app.get("/health")
-async def health_check():
-    return {"status": "ok", "version": "1.0.0"}

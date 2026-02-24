@@ -5,6 +5,7 @@ import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'reac
 import MonacoEditor from '@/features/ide/editor/MonacoEditor';
 import TerminalPanel from '@/features/ide/terminal/TerminalPanel';
 import AIAnalysisPanel from '@/features/ide/ai-panel/AIAnalysisPanel';
+import FileTree from '@/features/ide/file-tree/FileTree';
 import AuthModal from '@/features/auth/AuthModal';
 import { useStore } from '@/store';
 import { Play, Loader2, UserCircle, LogOut } from 'lucide-react';
@@ -134,8 +135,15 @@ export default function Home() {
       <main className="flex-1 h-[calc(100vh-3.5rem)]">
         <PanelGroup orientation="horizontal">
 
-          {/* Left Column: Editor & Terminal */}
-          <Panel defaultSize={70} minSize={30}>
+          {/* Left Column: Explorer */}
+          <Panel defaultSize={20} minSize={15} maxSize={30}>
+            <FileTree />
+          </Panel>
+
+          <PanelResizeHandle className="w-1 bg-[#252526] hover:bg-blue-600 transition-colors cursor-col-resize flex flex-col items-center justify-center border-r border-gray-800" />
+
+          {/* Middle Column: Editor & Terminal */}
+          <Panel defaultSize={50} minSize={30}>
             <PanelGroup orientation="vertical">
               <Panel defaultSize={70} minSize={20}>
                 <div className="h-full border-r border-b border-gray-800 bg-[#1e1e1e]">

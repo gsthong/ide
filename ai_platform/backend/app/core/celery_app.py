@@ -3,6 +3,10 @@ import os
 import asyncio
 from services.scoring_engine import ScoringEngine
 from services.llm_service import get_llm_service
+from sqlalchemy import select
+from db.database import async_session_maker
+from db.models import Submission, AIAnalysis
+from services.elo_engine import AdaptiveEloEngine
 
 # Redis used as both broker and result backend for Celery
 redis_url = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
@@ -37,8 +41,8 @@ def process_submission_task(self, submission_id: int, student_code: str, languag
     results = loop.run_until_complete(ScoringEngine.evaluate_submission(
         student_code, language, test_cases, time_limit_ms, memory_limit_mb
     ))
-    
     ai_analysis = None
+    ai_analysis_db = None
     if results["score"] < 100.0 or results["status"] != "Accepted":
         llm = get_llm_service()
         try:
@@ -53,9 +57,43 @@ def process_submission_task(self, submission_id: int, student_code: str, languag
             ))
             # Pydantic dump for serialization
             ai_analysis = analysis_obj.model_dump()
+            ai_analysis_db = analysis_obj
         except Exception as e:
             ai_analysis = {"error": f"LLM Generation failed: {str(e)}"}
+
+    async def update_db():
+        async with async_session_maker() as session:
+            stmt = select(Submission).where(Submission.id == submission_id)
+            result = await session.execute(stmt)
+            submission = result.scalar_one_or_none()
             
+            if submission:
+                submission.status = results["status"]
+                submission.score = results["score"]
+                submission.time_taken_ms = results["time_taken_ms"]
+                submission.memory_used_mb = results["memory_used_mb"]
+                
+                # Update Elo
+                if submission.user_id and submission.problem_id:
+                    await AdaptiveEloEngine.update_user_skill(
+                        session, submission.user_id, submission.problem_id, results["score"], []
+                    )
+                    
+                # Store AI Analysis if generated
+                if ai_analysis_db:
+                    db_analysis = AIAnalysis(
+                        submission_id=submission.id,
+                        error_analysis=ai_analysis_db.error_analysis.model_dump(),
+                        complexity_analysis=ai_analysis_db.complexity_analysis.model_dump(),
+                        hints=ai_analysis_db.hints.model_dump(),
+                        test_cases_generated=[t.model_dump() for t in ai_analysis_db.test_cases]
+                    )
+                    session.add(db_analysis)
+                    
+                await session.commit()
+                
+    loop.run_until_complete(update_db())
+
     return {
         "submission_id": submission_id,
         "results": results,
