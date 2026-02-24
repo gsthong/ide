@@ -5,8 +5,9 @@ import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'reac
 import MonacoEditor from '@/features/ide/editor/MonacoEditor';
 import TerminalPanel from '@/features/ide/terminal/TerminalPanel';
 import AIAnalysisPanel from '@/features/ide/ai-panel/AIAnalysisPanel';
+import AuthModal from '@/features/auth/AuthModal';
 import { useStore } from '@/store';
-import { Play, Loader2 } from 'lucide-react';
+import { Play, Loader2, UserCircle, LogOut } from 'lucide-react';
 import { submitCode, pollSubmissionStatus } from '@/services/api';
 
 export default function Home() {
@@ -20,8 +21,13 @@ export default function Home() {
     submissionStatus,
     setSubmissionState,
     setSubmissionResult,
-    setSubmissionError
+    setSubmissionError,
+    isAuthenticated,
+    user,
+    logoutAction
   } = useStore();
+
+  const [isAuthModalOpen, setIsAuthModalOpen] = React.useState(false);
 
   const handleRunCode = async () => {
     if (isExecuting) return;
@@ -96,6 +102,23 @@ export default function Home() {
         </div>
 
         <div className="flex items-center space-x-4">
+          {isAuthenticated ? (
+            <div className="flex items-center space-x-3 text-sm border-r border-gray-700 pr-4 mr-1">
+              <UserCircle className="w-5 h-5 text-gray-400" />
+              <span className="font-medium text-gray-200">{user?.username}</span>
+              <button onClick={() => logoutAction()} className="text-gray-500 hover:text-red-400 transition-colors" title="Logout">
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setIsAuthModalOpen(true)}
+              className="text-sm font-medium text-gray-300 hover:text-white border-r border-gray-700 pr-4 mr-1 transition-colors"
+            >
+              Sign In
+            </button>
+          )}
+
           <button
             onClick={handleRunCode}
             disabled={isExecuting || submissionStatus === 'submitting' || submissionStatus === 'polling'}
@@ -145,6 +168,9 @@ export default function Home() {
 
         </PanelGroup>
       </main>
+
+      {/* Auth Modal Overlay */}
+      <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} />
     </div>
   );
 }

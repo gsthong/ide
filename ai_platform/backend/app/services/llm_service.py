@@ -8,6 +8,8 @@ from schemas.domain import AIAnalysisResponse
 from pydantic import ValidationError
 import httpx
 import asyncio
+import time
+from core.metrics import LLM_LATENCY_SECONDS, LLM_RETRIES, LLM_TOKENS_USED
 
 logger = logging.getLogger(__name__)
 
@@ -94,10 +96,13 @@ class FaultTolerantLLMService(LLMServiceBase):
         current_prompt = base_prompt
         last_error = None
         
+        start_time = time.time()
+        
         for attempt in range(self.max_retries + 1):
             try:
                 # Add jittered backoff on retries (Circuit break prevention)
                 if attempt > 0:
+                    LLM_RETRIES.labels(provider=self.provider).inc()
                     await asyncio.sleep(2 ** attempt)
                     
                 raw_json_str = await self._call_inference(current_prompt)
@@ -113,6 +118,13 @@ class FaultTolerantLLMService(LLMServiceBase):
                 
                 # Enforce strict Pydantic rules
                 validated_model = AIAnalysisResponse(**parsed_data)
+                
+                # Simple heuristic token usage tracking for blueprint
+                estimated_tokens = len(current_prompt) // 4 + len(raw_json_str) // 4
+                LLM_TOKENS_USED.labels(provider=self.provider).inc(estimated_tokens)
+                
+                LLM_LATENCY_SECONDS.labels(provider=self.provider).observe(time.time() - start_time)
+                
                 return validated_model
                 
             except json.JSONDecodeError as e:
@@ -132,6 +144,7 @@ class FaultTolerantLLMService(LLMServiceBase):
                 if attempt == self.max_retries:
                     raise # Drop to circuit breaker upper level
         
+        LLM_LATENCY_SECONDS.labels(provider=self.provider).observe(time.time() - start_time)
         # Fallback if unrecoverable
         raise Exception(f"Failed to generate valid analysis after {self.max_retries} retries. Last error: {last_error}")
 

@@ -51,3 +51,10 @@ export interface SubmissionResultResponse {
     attempts: AttemptResult[];
     ai_analysis: AIAnalysisResponse | null;
 }
+
+export interface UserResponse {
+    id: number;
+    username: string;
+    email: string;
+    is_active: boolean;
+}

@@ -2,6 +2,7 @@ import json
 import logging
 from typing import List, Dict, Any
 from core.docker_sandbox import execute_code_secure
+from core.metrics import SUBMISSION_VERDICTS, SANDBOX_RUNTIME_SECONDS, SANDBOX_MEMORY_MB
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,11 @@ if __name__ == '__main__':
         
         if final_score == 0 and status == "Wrong Answer":
             status = "Failed"
+
+        # Export Metrics to Prometheus
+        SUBMISSION_VERDICTS.labels(status=status).inc()
+        SANDBOX_RUNTIME_SECONDS.labels(language=language).observe(max_time_ms / 1000.0)
+        SANDBOX_MEMORY_MB.labels(language=language).observe(peak_memory_mb)
 
         return {
             "status": status,
