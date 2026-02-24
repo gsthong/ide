@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import MonacoEditor from '@/features/ide/editor/MonacoEditor';
 import TerminalPanel from '@/features/ide/terminal/TerminalPanel';
 import AIAnalysisPanel from '@/features/ide/ai-panel/AIAnalysisPanel';
@@ -109,11 +109,11 @@ export default function Home() {
 
       {/* Main IDE Layout */}
       <main className="flex-1 h-[calc(100vh-3.5rem)]">
-        <PanelGroup direction="horizontal">
+        <PanelGroup orientation="horizontal">
 
           {/* Left Column: Editor & Terminal */}
           <Panel defaultSize={70} minSize={30}>
-            <PanelGroup direction="vertical">
+            <PanelGroup orientation="vertical">
               <Panel defaultSize={70} minSize={20}>
                 <div className="h-full border-r border-b border-gray-800 bg-[#1e1e1e]">
                   <MonacoEditor />

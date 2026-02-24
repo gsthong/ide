@@ -10,6 +10,11 @@ services:
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+    volumes:
+      - ../frontend/src:/app/src
+      - ../frontend/public:/app/public
+      - ../frontend/next.config.ts:/app/next.config.ts
+      - ../frontend/tailwind.config.ts:/app/tailwind.config.ts
     depends_on:
       - api
   api:
